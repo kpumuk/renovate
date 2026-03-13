@@ -26,7 +26,7 @@ function buildRepomdXml({
 }: {
   primaryDbHref?: string;
   primaryHref?: string;
-}): string {
+} = {}): string {
   return codeBlock`
     <?xml version="1.0" encoding="UTF-8"?>
     <repomd xmlns="http://linux.duke.edu/metadata/repo" xmlns:rpm="http://linux.duke.edu/metadata/rpm">
@@ -102,19 +102,13 @@ function mockRepomdResponse({
 }: {
   primaryDbHref?: string;
   primaryHref?: string;
-}): void {
+} = {}): void {
   httpMock
     .scope(registryUrl)
     .get('/repomd.xml')
     .reply(200, buildRepomdXml({ primaryDbHref, primaryHref }), {
       'Content-Type': 'application/xml',
     });
-}
-
-function mockRawRepomdResponse(repomdXml: string): void {
-  httpMock.scope(registryUrl).get('/repomd.xml').reply(200, repomdXml, {
-    'Content-Type': 'application/xml',
-  });
 }
 
 function mockPrimaryXmlResponse(primaryXml: string): void {
@@ -160,19 +154,7 @@ describe('modules/datasource/rpm/index', () => {
 
   describe('getPrimaryGzipUrl', () => {
     it('returns the correct primary.xml URL', async () => {
-      const repomdXml = codeBlock`
-        <?xml version="1.0" encoding="UTF-8"?>
-        <repomd xmlns="http://linux.duke.edu/metadata/repo" xmlns:rpm="http://linux.duke.edu/metadata/rpm">
-          <data type="primary">
-            <location href="repodata/somesha256-primary.xml.gz"/>
-          </data>
-        </repomd>
-      `;
-
-      httpMock
-        .scope(registryUrl)
-        .get('/repomd.xml')
-        .reply(200, repomdXml, { 'Content-Type': 'application/xml' });
+      mockRepomdResponse();
 
       const resolvedPrimaryXmlUrl =
         await rpmDatasource.getPrimaryGzipUrl(registryUrl);
@@ -305,7 +287,7 @@ describe('modules/datasource/rpm/index', () => {
     });
 
     it('ignores primary_db entries without a location element', async () => {
-      mockRawRepomdResponse(codeBlock`
+      const repomdXml = codeBlock`
         <?xml version="1.0" encoding="UTF-8"?>
         <repomd xmlns="http://linux.duke.edu/metadata/repo" xmlns:rpm="http://linux.duke.edu/metadata/rpm">
           <data type="primary">
@@ -315,7 +297,12 @@ describe('modules/datasource/rpm/index', () => {
             <non-location href="repodata/somesha256-primary.sqlite.gz"/>
           </data>
         </repomd>
-      `);
+      `;
+
+      httpMock
+        .scope(registryUrl)
+        .get('/repomd.xml')
+        .reply(200, repomdXml, { 'Content-Type': 'application/xml' });
 
       await expect(rpmDatasource.getPrimaryGzipUrl(registryUrl)).resolves.toBe(
         primaryXmlUrl,
@@ -323,7 +310,7 @@ describe('modules/datasource/rpm/index', () => {
     });
 
     it('ignores primary_db entries without an href attribute', async () => {
-      mockRawRepomdResponse(codeBlock`
+      const repomdXml = codeBlock`
         <?xml version="1.0" encoding="UTF-8"?>
         <repomd xmlns="http://linux.duke.edu/metadata/repo" xmlns:rpm="http://linux.duke.edu/metadata/rpm">
           <data type="primary">
@@ -333,7 +320,12 @@ describe('modules/datasource/rpm/index', () => {
             <location non-href="repodata/somesha256-primary.sqlite.gz"/>
           </data>
         </repomd>
-      `);
+      `;
+
+      httpMock
+        .scope(registryUrl)
+        .get('/repomd.xml')
+        .reply(200, repomdXml, { 'Content-Type': 'application/xml' });
 
       await expect(rpmDatasource.getPrimaryGzipUrl(registryUrl)).resolves.toBe(
         primaryXmlUrl,
@@ -793,7 +785,7 @@ describe('modules/datasource/rpm/index', () => {
     });
 
     it('returns the correct releases', async () => {
-      mockRepomdResponse({});
+      mockRepomdResponse();
       mockPrimaryXmlResponse(
         buildPrimaryXml(codeBlock`
           <package type="rpm">
@@ -849,7 +841,7 @@ describe('modules/datasource/rpm/index', () => {
     });
 
     it('throws an error if primary metadata parsing fails', async () => {
-      mockRepomdResponse({});
+      mockRepomdResponse();
       mockPrimaryXmlResponse(codeBlock`
         <?xml version="1.0" encoding="UTF-8"?>
         <%$#metadata xmlns="http://linux.duke.edu/metadata/common">
@@ -963,7 +955,7 @@ describe('modules/datasource/rpm/index', () => {
     });
 
     it('throws when rpmMetadataSource is primary_db and primary_db metadata is absent', async () => {
-      mockRepomdResponse({ primaryHref: 'repodata/somesha256-primary.xml.gz' });
+      mockRepomdResponse();
 
       await expect(
         rpmDatasource.getReleases({
@@ -990,7 +982,7 @@ describe('modules/datasource/rpm/index', () => {
     });
 
     it('falls back to primary.xml.gz when primary_db is absent', async () => {
-      mockRepomdResponse({ primaryHref: 'repodata/somesha256-primary.xml.gz' });
+      mockRepomdResponse();
       mockPrimaryXmlResponse(
         buildPrimaryXml(codeBlock`
           <package type="rpm">
