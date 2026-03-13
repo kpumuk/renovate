@@ -1,18 +1,40 @@
+import { logger } from '../../../logger/index.ts';
 import { withCache } from '../../../util/cache/package/with-cache.ts';
 import { Datasource } from '../datasource.ts';
 import type { GetReleasesConfig, ReleaseResult } from '../types.ts';
 import { datasource } from './common.ts';
+import { RpmSqliteMetadataProvider } from './providers/sqlite.ts';
 import { RpmXmlMetadataProvider } from './providers/xml.ts';
-import { fetchPrimaryGzipUrl } from './repomd.ts';
+import {
+  type RpmRepositoryMetadata,
+  fetchPrimaryGzipUrl,
+  fetchRepositoryMetadata,
+} from './repomd.ts';
+
+type RpmMetadataSource = 'primary' | 'primary_db';
+type ResolvedRpmMetadataSource = 'auto' | RpmMetadataSource;
+
+interface RpmMetadataProvider {
+  readonly metadataType: RpmMetadataSource;
+  getReleases(
+    metadataUrl: string,
+    packageName: string,
+  ): Promise<ReleaseResult | null>;
+}
 
 export class RpmDatasource extends Datasource {
   static readonly id = datasource;
 
-  private readonly xmlProvider: RpmXmlMetadataProvider;
+  private readonly providers: Record<RpmMetadataSource, RpmMetadataProvider>;
 
   constructor() {
     super(RpmDatasource.id);
-    this.xmlProvider = new RpmXmlMetadataProvider(this.http);
+    const xmlProvider = new RpmXmlMetadataProvider(this.http);
+    const sqliteProvider = new RpmSqliteMetadataProvider(this.http);
+    this.providers = {
+      [xmlProvider.metadataType]: xmlProvider,
+      [sqliteProvider.metadataType]: sqliteProvider,
+    };
   }
 
   /**
@@ -41,28 +63,132 @@ export class RpmDatasource extends Datasource {
   private async _getReleases({
     registryUrl,
     packageName,
+    rpmMetadataSource,
   }: GetReleasesConfig): Promise<ReleaseResult | null> {
     if (!registryUrl || !packageName) {
       return null;
     }
 
     try {
-      const primaryGzipUrl = await this.getPrimaryGzipUrl(registryUrl);
-      return await this.getReleasesByPackageName(primaryGzipUrl, packageName);
+      const metadata = await this.getRepositoryMetadata(registryUrl);
+      const metadataSource = this.resolveMetadataSource(rpmMetadataSource);
+
+      if (metadataSource !== 'auto') {
+        return await this.getProviderReleases(
+          metadataSource,
+          metadata,
+          packageName,
+        );
+      }
+
+      return await this.getAutoReleases(metadata, packageName, registryUrl);
     } catch (err) {
       this.handleGenericErrors(err);
     }
   }
 
   getReleases(config: GetReleasesConfig): Promise<ReleaseResult | null> {
+    const metadataSource = this.resolveMetadataSource(config.rpmMetadataSource);
+
     return withCache(
       {
         namespace: `datasource-${RpmDatasource.id}`,
-        key: `${config.registryUrl}:${config.packageName}`,
+        key: `${config.registryUrl}:${config.packageName}:${metadataSource}`,
         ttlMinutes: 1440,
         fallback: true,
       },
       () => this._getReleases(config),
+    );
+  }
+
+  private resolveMetadataSource(
+    rpmMetadataSource?: GetReleasesConfig['rpmMetadataSource'],
+  ): ResolvedRpmMetadataSource {
+    if (rpmMetadataSource === 'primary' || rpmMetadataSource === 'primary_db') {
+      return rpmMetadataSource;
+    }
+
+    return 'auto';
+  }
+
+  private async getAutoReleases(
+    metadata: RpmRepositoryMetadata,
+    packageName: string,
+    registryUrl: string,
+  ): Promise<ReleaseResult | null> {
+    const { primaryDbUrl, primaryGzipUrl } = metadata;
+    let sqliteError: Error | undefined;
+
+    if (primaryDbUrl) {
+      try {
+        return await this.getProviderReleases(
+          'primary_db',
+          metadata,
+          packageName,
+        );
+      } catch (err) {
+        sqliteError = err instanceof Error ? err : new Error(String(err));
+        logger.debug(
+          {
+            datasource: RpmDatasource.id,
+            err,
+            packageName,
+            registryUrl,
+            repodataType: 'primary_db',
+            url: primaryDbUrl,
+          },
+          'Failed to query primary_db metadata, falling back to primary.xml.gz',
+        );
+      }
+    }
+
+    if (primaryGzipUrl) {
+      return await this.getProviderReleases('primary', metadata, packageName);
+    }
+
+    if (sqliteError) {
+      throw sqliteError;
+    }
+
+    return null;
+  }
+
+  private async getProviderReleases(
+    metadataType: RpmMetadataSource,
+    metadata: RpmRepositoryMetadata,
+    packageName: string,
+  ): Promise<ReleaseResult | null> {
+    const metadataUrl = this.getMetadataUrl(metadata, metadataType);
+
+    if (!metadataUrl) {
+      throw new Error(`No ${metadataType} data found in ${metadata.repomdUrl}`);
+    }
+
+    return await this.providers[metadataType].getReleases(
+      metadataUrl,
+      packageName,
+    );
+  }
+
+  private getMetadataUrl(
+    metadata: RpmRepositoryMetadata,
+    metadataType: RpmMetadataSource,
+  ): string | undefined {
+    return metadataType === 'primary'
+      ? metadata.primaryGzipUrl
+      : metadata.primaryDbUrl;
+  }
+
+  private getRepositoryMetadata(
+    registryUrl: string,
+  ): Promise<RpmRepositoryMetadata> {
+    return withCache(
+      {
+        namespace: `datasource-${RpmDatasource.id}`,
+        key: `repomd:${registryUrl}`,
+        ttlMinutes: 1440,
+      },
+      () => fetchRepositoryMetadata(this.http, registryUrl),
     );
   }
 
@@ -81,6 +207,6 @@ export class RpmDatasource extends Datasource {
     primaryGzipUrl: string,
     packageName: string,
   ): Promise<ReleaseResult | null> {
-    return this.xmlProvider.getReleases(primaryGzipUrl, packageName);
+    return this.providers.primary.getReleases(primaryGzipUrl, packageName);
   }
 }

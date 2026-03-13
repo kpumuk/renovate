@@ -1,6 +1,7 @@
 import type {
   ConstraintsFilter,
   CustomDatasourceConfig,
+  RpmMetadataSource,
 } from '../../config/types.ts';
 import type { ModuleApi } from '../../types/index.ts';
 import type {
@@ -42,6 +43,7 @@ export interface GetReleasesConfig {
    */
   constraintsVersioning?: Partial<Record<AdditionalConstraintName, string>>;
   constraintsFiltering?: ConstraintsFilter;
+  rpmMetadataSource?: RpmMetadataSource;
 }
 
 export interface GetPkgReleasesConfig {
@@ -66,6 +68,7 @@ export interface GetPkgReleasesConfig {
    */
   constraintsVersioning?: Partial<Record<AdditionalConstraintName, string>>;
   registryStrategy?: RegistryStrategy;
+  rpmMetadataSource?: RpmMetadataSource;
 }
 
 export interface Release {
