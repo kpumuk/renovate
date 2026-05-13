@@ -13,20 +13,22 @@ Renovate reads `repomd.xml` first to discover the available metadata files.
 If the repository exposes `primary_db` / `primary.sqlite.gz`, Renovate will use it first.
 Otherwise, or if the SQLite metadata cannot be used, Renovate falls back to `primary.xml.gz`.
 
-If you need to control this behavior explicitly, set `rpmMetadataSource` to one of:
+If you need to control this behavior explicitly, add `rpmMetadataSource` to the `registryUrl` fragment:
 
-- `auto`: prefer `primary_db`, fall back to `primary`
-- `primary_db`: require `primary_db` metadata
-- `primary`: require `primary` metadata
+- `#rpmMetadataSource=auto`: prefer `primary_db`, fall back to `primary`
+- `#rpmMetadataSource=primary_db`: require `primary_db` metadata
+- `#rpmMetadataSource=primary`: require `primary` metadata
 
 For example:
 
 ```json
 {
-  "packageRules": [
+  "customManagers": [
     {
-      "matchDatasources": ["rpm"],
-      "rpmMetadataSource": "primary"
+      "customType": "regex",
+      "managerFilePatterns": ["path_to_manifest_json"],
+      "registryUrlTemplate": "http://example.com/repo/repodata/#rpmMetadataSource=primary",
+      "datasourceTemplate": "rpm"
     }
   ]
 }

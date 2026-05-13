@@ -49,7 +49,6 @@ export type RecreateWhen = 'auto' | 'never' | 'always';
 export type PlatformCommitOptions = 'auto' | 'disabled' | 'enabled';
 
 export type BinarySource = 'docker' | 'global' | 'install' | 'hermit';
-export type RpmMetadataSource = 'auto' | 'primary' | 'primary_db';
 
 // TODO: Proper typings
 /**
@@ -147,7 +146,6 @@ export interface RenovateSharedConfig {
   repositoryCacheType?: RepositoryCacheType;
   respectLatest?: boolean;
   rollbackPrs?: boolean;
-  rpmMetadataSource?: RpmMetadataSource;
   schedule?: string[];
   semanticCommitScope?: string | null;
   semanticCommitType?: string;

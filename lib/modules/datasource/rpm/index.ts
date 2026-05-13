@@ -1,5 +1,6 @@
 import { logger } from '../../../logger/index.ts';
 import { withCache } from '../../../util/cache/package/with-cache.ts';
+import { parseUrl } from '../../../util/url.ts';
 import { Datasource } from '../datasource.ts';
 import type { GetReleasesConfig, ReleaseResult } from '../types.ts';
 import { datasource } from './common.ts';
@@ -13,6 +14,11 @@ import {
 
 type RpmMetadataSource = 'primary' | 'primary_db';
 type ResolvedRpmMetadataSource = 'auto' | RpmMetadataSource;
+
+interface ParsedRpmRegistryUrl {
+  metadataSource: ResolvedRpmMetadataSource;
+  registryUrl: string;
+}
 
 interface RpmMetadataProvider {
   readonly metadataType: RpmMetadataSource;
@@ -63,37 +69,44 @@ export class RpmDatasource extends Datasource {
   private async _getReleases({
     registryUrl,
     packageName,
-    rpmMetadataSource,
   }: GetReleasesConfig): Promise<ReleaseResult | null> {
     if (!registryUrl || !packageName) {
       return null;
     }
 
     try {
-      const metadata = await this.getRepositoryMetadata(registryUrl);
-      const metadataSource = this.resolveMetadataSource(rpmMetadataSource);
+      const parsedRegistryUrl = this.parseRegistryUrl(registryUrl);
+      const metadata = await this.getRepositoryMetadata(
+        parsedRegistryUrl.registryUrl,
+      );
 
-      if (metadataSource !== 'auto') {
+      if (parsedRegistryUrl.metadataSource !== 'auto') {
         return await this.getProviderReleases(
-          metadataSource,
+          parsedRegistryUrl.metadataSource,
           metadata,
           packageName,
         );
       }
 
-      return await this.getAutoReleases(metadata, packageName, registryUrl);
+      return await this.getAutoReleases(
+        metadata,
+        packageName,
+        parsedRegistryUrl.registryUrl,
+      );
     } catch (err) {
       this.handleGenericErrors(err);
     }
   }
 
-  getReleases(config: GetReleasesConfig): Promise<ReleaseResult | null> {
-    const metadataSource = this.resolveMetadataSource(config.rpmMetadataSource);
+  async getReleases(config: GetReleasesConfig): Promise<ReleaseResult | null> {
+    const parsedRegistryUrl = config.registryUrl
+      ? this.parseRegistryUrl(config.registryUrl)
+      : undefined;
 
-    return withCache(
+    return await withCache(
       {
         namespace: `datasource-${RpmDatasource.id}`,
-        key: `${config.registryUrl}:${config.packageName}:${metadataSource}`,
+        key: `${parsedRegistryUrl?.registryUrl}:${config.packageName}:${parsedRegistryUrl?.metadataSource ?? 'auto'}`,
         ttlMinutes: 1440,
         fallback: true,
       },
@@ -101,14 +114,39 @@ export class RpmDatasource extends Datasource {
     );
   }
 
-  private resolveMetadataSource(
-    rpmMetadataSource?: GetReleasesConfig['rpmMetadataSource'],
-  ): ResolvedRpmMetadataSource {
-    if (rpmMetadataSource === 'primary' || rpmMetadataSource === 'primary_db') {
-      return rpmMetadataSource;
+  private parseRegistryUrl(registryUrl: string): ParsedRpmRegistryUrl {
+    const parsedUrl = parseUrl(registryUrl);
+    if (!parsedUrl) {
+      return { metadataSource: 'auto', registryUrl };
     }
 
-    return 'auto';
+    const rpmMetadataSource = new URLSearchParams(parsedUrl.hash.slice(1)).get(
+      'rpmMetadataSource',
+    );
+
+    if (!rpmMetadataSource) {
+      return { metadataSource: 'auto', registryUrl };
+    }
+
+    if (rpmMetadataSource === 'primary' || rpmMetadataSource === 'primary_db') {
+      parsedUrl.hash = '';
+      return {
+        metadataSource: rpmMetadataSource,
+        registryUrl: parsedUrl.href,
+      };
+    }
+
+    if (rpmMetadataSource !== 'auto') {
+      throw new Error(
+        `Invalid rpmMetadataSource in RPM registry URL: ${rpmMetadataSource}`,
+      );
+    }
+
+    parsedUrl.hash = '';
+    return {
+      metadataSource: 'auto',
+      registryUrl: parsedUrl.href,
+    };
   }
 
   private async getAutoReleases(
@@ -193,13 +231,15 @@ export class RpmDatasource extends Datasource {
   }
 
   getPrimaryGzipUrl(registryUrl: string): Promise<string> {
+    const parsedRegistryUrl = this.parseRegistryUrl(registryUrl);
+
     return withCache(
       {
         namespace: `datasource-${RpmDatasource.id}`,
-        key: registryUrl,
+        key: parsedRegistryUrl.registryUrl,
         ttlMinutes: 1440,
       },
-      () => fetchPrimaryGzipUrl(this.http, registryUrl),
+      () => fetchPrimaryGzipUrl(this.http, parsedRegistryUrl.registryUrl),
     );
   }
 

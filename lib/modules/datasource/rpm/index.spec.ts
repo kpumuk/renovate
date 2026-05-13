@@ -889,9 +889,8 @@ describe('modules/datasource/rpm/index', () => {
         packageName: 'example-package',
       });
       const xmlReleases = await rpmDatasource.getReleases({
-        registryUrl,
+        registryUrl: `${registryUrl}#rpmMetadataSource=primary`,
         packageName: 'example-package',
-        rpmMetadataSource: 'primary',
       });
 
       expect(autoReleases).toEqual({
@@ -924,7 +923,7 @@ describe('modules/datasource/rpm/index', () => {
       expect(releases).toBeNull();
     });
 
-    it('does not fall back to primary.xml.gz when rpmMetadataSource is primary_db', async () => {
+    it('does not fall back to primary.xml.gz when registryUrl requires primary_db', async () => {
       mockRepomdResponse({
         primaryDbHref: 'repodata/somesha256-primary.sqlite.gz',
       });
@@ -932,9 +931,8 @@ describe('modules/datasource/rpm/index', () => {
 
       await expect(
         rpmDatasource.getReleases({
-          registryUrl,
+          registryUrl: `${registryUrl}#rpmMetadataSource=primary_db`,
           packageName: 'example-package',
-          rpmMetadataSource: 'primary_db',
         }),
       ).rejects.toThrow();
     });
@@ -954,19 +952,18 @@ describe('modules/datasource/rpm/index', () => {
       ).rejects.toThrow();
     });
 
-    it('throws when rpmMetadataSource is primary_db and primary_db metadata is absent', async () => {
+    it('throws when registryUrl requires primary_db and primary_db metadata is absent', async () => {
       mockRepomdResponse();
 
       await expect(
         rpmDatasource.getReleases({
-          registryUrl,
+          registryUrl: `${registryUrl}#rpmMetadataSource=primary_db`,
           packageName: 'example-package',
-          rpmMetadataSource: 'primary_db',
         }),
       ).rejects.toThrow(`No primary_db data found in ${registryUrl}repomd.xml`);
     });
 
-    it('throws when rpmMetadataSource is primary and primary metadata is absent', async () => {
+    it('throws when registryUrl requires primary and primary metadata is absent', async () => {
       mockRepomdResponse({
         primaryDbHref: 'repodata/somesha256-primary.sqlite.gz',
         primaryHref: '',
@@ -974,11 +971,21 @@ describe('modules/datasource/rpm/index', () => {
 
       await expect(
         rpmDatasource.getReleases({
-          registryUrl,
+          registryUrl: `${registryUrl}#rpmMetadataSource=primary`,
           packageName: 'example-package',
-          rpmMetadataSource: 'primary',
         }),
       ).rejects.toThrow(`No primary data found in ${registryUrl}repomd.xml`);
+    });
+
+    it('throws when registryUrl has invalid rpmMetadataSource', async () => {
+      await expect(
+        rpmDatasource.getReleases({
+          registryUrl: `${registryUrl}#rpmMetadataSource=broken`,
+          packageName: 'example-package',
+        }),
+      ).rejects.toThrow(
+        'Invalid rpmMetadataSource in RPM registry URL: broken',
+      );
     });
 
     it('falls back to primary.xml.gz when primary_db is absent', async () => {
