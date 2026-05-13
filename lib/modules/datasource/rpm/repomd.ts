@@ -59,6 +59,7 @@ function getRepodataUrl(
 export async function fetchRepositoryMetadata(
   http: Http,
   registryUrl: string,
+  primaryRequired = false,
 ): Promise<RpmRepositoryMetadata> {
   const repomdUrl = joinUrlParts(registryUrl, repomdXmlFileName);
   const response = await http.getText(repomdUrl.toString());
@@ -78,6 +79,7 @@ export async function fetchRepositoryMetadata(
     registryUrl,
     repomdUrl.toString(),
     'primary',
+    !primaryRequired,
   );
   const primaryDbUrl = getRepodataUrl(
     xml,
@@ -105,7 +107,7 @@ export async function fetchPrimaryGzipUrl(
   http: Http,
   registryUrl: string,
 ): Promise<string> {
-  const metadata = await fetchRepositoryMetadata(http, registryUrl);
+  const metadata = await fetchRepositoryMetadata(http, registryUrl, true);
 
   if (!metadata.primaryGzipUrl) {
     throw new Error(`No primary data found in ${metadata.repomdUrl}`);

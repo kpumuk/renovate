@@ -111,6 +111,12 @@ function mockRepomdResponse({
     });
 }
 
+function mockRawRepomdResponse(repomdXml: string): void {
+  httpMock.scope(registryUrl).get('/repomd.xml').reply(200, repomdXml, {
+    'Content-Type': 'application/xml',
+  });
+}
+
 function mockPrimaryXmlResponse(primaryXml: string): void {
   httpMock
     .scope(primaryXmlRegistryUrl)
@@ -330,6 +336,24 @@ describe('modules/datasource/rpm/index', () => {
       await expect(rpmDatasource.getPrimaryGzipUrl(registryUrl)).resolves.toBe(
         primaryXmlUrl,
       );
+    });
+
+    it('validates primary metadata even when primary_db is present', async () => {
+      mockRawRepomdResponse(codeBlock`
+        <?xml version="1.0" encoding="UTF-8"?>
+        <repomd xmlns="http://linux.duke.edu/metadata/repo" xmlns:rpm="http://linux.duke.edu/metadata/rpm">
+          <data type="primary">
+            <location non-href="repodata/somesha256-primary.xml.gz"/>
+          </data>
+          <data type="primary_db">
+            <location href="repodata/somesha256-primary.sqlite.gz"/>
+          </data>
+        </repomd>
+      `);
+
+      await expect(
+        rpmDatasource.getPrimaryGzipUrl(registryUrl),
+      ).rejects.toThrow(`No href found in ${registryUrl}repomd.xml`);
     });
   });
 
@@ -950,6 +974,38 @@ describe('modules/datasource/rpm/index', () => {
           packageName: 'example-package',
         }),
       ).rejects.toThrow();
+    });
+
+    it('uses primary_db when primary metadata is malformed', async () => {
+      mockRawRepomdResponse(codeBlock`
+        <?xml version="1.0" encoding="UTF-8"?>
+        <repomd xmlns="http://linux.duke.edu/metadata/repo" xmlns:rpm="http://linux.duke.edu/metadata/rpm">
+          <data type="primary">
+            <location non-href="repodata/somesha256-primary.xml.gz"/>
+          </data>
+          <data type="primary_db">
+            <location href="repodata/somesha256-primary.sqlite.gz"/>
+          </data>
+        </repomd>
+      `);
+      mockPrimaryDbResponse(
+        await createPrimaryDbGzip([
+          {
+            name: 'example-package',
+            release: '2.azl3',
+            version: '1.0',
+          },
+        ]),
+      );
+
+      await expect(
+        rpmDatasource.getReleases({
+          registryUrl: `${registryUrl}#rpmMetadataSource=primary_db`,
+          packageName: 'example-package',
+        }),
+      ).resolves.toEqual({
+        releases: [{ version: '1.0-2.azl3' }],
+      });
     });
 
     it('throws when registryUrl requires primary_db and primary_db metadata is absent', async () => {
